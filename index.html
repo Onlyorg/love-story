@@ -2,7 +2,7 @@
 <html lang="id">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Dit & Nar · Dashboard Cinta</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -26,6 +26,9 @@
       const db  = getDatabase(app);
       window._fb = { db, ref, push, onChildAdded, onValue, set, remove, onDisconnect, serverTimestamp };
       window.dispatchEvent(new Event('firebase-ready'));
+      // FIX: sembunyikan loading bar saat Firebase siap
+      const bar = document.getElementById('fbLoadingBar');
+      if (bar) { bar.classList.add('done'); setTimeout(() => bar.remove(), 800); }
     </script>
     <style>
         /* ===== CSS VARIABLES ===== */
@@ -702,7 +705,22 @@
             .counter-quad-grid { gap: 7px; }
         }
 
-        /* ANNIVERSARY COUNTDOWN */
+        #page-dashboard, #page-dashboard * {
+            max-width: 100%;
+            box-sizing: border-box;
+        }
+        #page-dashboard canvas {
+            max-width: 100% !important;
+            height: auto !important;
+        }
+        #page-dashboard .counter-grid,
+        #page-dashboard .counter-grid-sm,
+        #page-dashboard .anniv-grid,
+        #page-dashboard .grid-2,
+        #page-dashboard .grid-4 {
+            width: 100%;
+            overflow: hidden;
+        }
         .anniv-grid {
             display: grid;
             grid-template-columns: repeat(4, 1fr);
@@ -1243,7 +1261,8 @@
         @media (max-width: 380px) {
             .grid-3, .grid-4 { grid-template-columns: 1fr; }
             .counter-grid { grid-template-columns: repeat(2, 1fr); }
-            .anniv-grid { grid-template-columns: repeat(4, 1fr); gap: 5px; }
+            .counter-grid-sm { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+            .anniv-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
             .anniv-num { font-size: 1.2rem; }
             .counter-quad-num { font-size: 1.1rem; }
             .counter-hero-num { font-size: 2rem; }
@@ -2078,9 +2097,30 @@
             .draw-color-dot { width: 19px; height: 19px; }
             .draw-brush-slider { width: 55px; }
         }
+        /* FIX: Firebase loading indicator */
+        #fbLoadingBar {
+            position: fixed; top: 0; left: 0;
+            height: 3px; width: 30%;
+            background: linear-gradient(90deg, var(--primary), #ff9eb5);
+            z-index: 999999;
+            animation: fbSlide 1.2s ease-in-out infinite alternate;
+            border-radius: 0 2px 2px 0;
+        }
+        #fbLoadingBar.done {
+            width: 100% !important;
+            animation: none;
+            opacity: 0;
+            transition: width 0.3s ease, opacity 0.4s ease 0.3s;
+        }
+        @keyframes fbSlide {
+            from { left: 0; width: 30%; }
+            to   { left: 70%; width: 30%; }
+        }
     </style>
 </head>
 <body>
+    <!-- FIX: Firebase loading bar -->
+    <div id="fbLoadingBar"></div>
 
     <!-- ===== INTRO LOVE OVERLAY ===== -->
     <div id="introOverlay">
@@ -2292,7 +2332,7 @@
     <!-- ============================================================ -->
     <!-- PAGE: DASHBOARD                                               -->
     <!-- ============================================================ -->
-    <div class="page" id="page-dashboard">
+    <div class="page" id="page-dashboard" style="max-width:100vw;overflow-x:hidden;">
         <div class="container">
 
             <div class="page-header">
@@ -3053,8 +3093,12 @@
         if (window.APP_WHO) {
             setTimeout(() => {
                 dismissIntro();
-                // propagate setelah DOM & Firebase siap
-                setTimeout(() => propagateWho(window.APP_WHO), 500);
+                // FIX: pakai firebase-ready event, bukan setTimeout 500ms yang tidak reliable
+                if (window._fb) {
+                    propagateWho(window.APP_WHO);
+                } else {
+                    window.addEventListener('firebase-ready', () => propagateWho(window.APP_WHO), { once: true });
+                }
             }, 2000);
         } else {
             // Belum pernah pilih: splash 2 detik, lalu tampilkan layar pilihan
@@ -3116,11 +3160,14 @@
             swiping = false;
             const dx = e.changedTouches[0].clientX - touchStartX;
             const dy = e.changedTouches[0].clientY - touchStartY;
-            // Minimal 60px horizontal, dan lebih horizontal dari vertikal
-            if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+            // FIX swipe: naikkan threshold 60→90px, rasio horizontal harus lebih dominan
+            if (Math.abs(dx) < 90 || Math.abs(dx) < Math.abs(dy) * 2.5) return;
             // Jangan trigger saat swipe di dalam modal/overlay
             const target = e.target;
             if (target.closest('#secretOverlay,#letterModal,#tarotModal,#constellModal,#galaxyOverlay,#giftOverlay,.music-card,.playlist-panel,#suratModal')) return;
+            // Jangan trigger kalau target ada di dalam elemen yang bisa discroll
+            const scrollable = target.closest('.surat-list, .mood-history, [style*="overflow"], [style*="overflow-y"]');
+            if (scrollable && Math.abs(dy) > 10) return;
 
             const current = pages.findIndex(p => document.getElementById('page-'+p).classList.contains('active'));
             if (current === -1) return;
@@ -3237,23 +3284,28 @@
             document.getElementById('stat-hari-kenal').textContent = totalDay;
         }
 
-        // Anniversary countdown — target: 1 tahun dari START_DATE
-        const anniversaryNum = Math.floor((now - START_DATE) / (365.25 * 86400000)) + 1;
-        const nextAnniv = new Date(START_DATE);
+        // Anniversary countdown — target: anniversary berikutnya
+        let anniversaryNum = Math.floor((now - START_DATE) / (365.25 * 86400000)) + 1;
+        let nextAnniv = new Date(START_DATE);
         nextAnniv.setFullYear(START_DATE.getFullYear() + anniversaryNum);
-        const toAnniv = nextAnniv - now;
+        let toAnniv = nextAnniv - now;
 
-        if (toAnniv > 0) {
-            const aD = Math.floor(toAnniv / 86400000);
-            const aH = Math.floor((toAnniv % 86400000) / 3600000);
-            const aM = Math.floor((toAnniv % 3600000) / 60000);
-            const aS = Math.floor((toAnniv % 60000) / 1000);
-            document.getElementById('a-hari').textContent  = aD;
-            document.getElementById('a-jam').textContent   = aH;
-            document.getElementById('a-menit').textContent = aM;
-            document.getElementById('a-detik').textContent = aS;
-            document.getElementById('anniv-caption').textContent = `Menuju anniversary ke-${anniversaryNum}`;
+        // Kalau hari ini tepat anniversary (toAnniv <= 0), langsung lompat ke anniversary berikutnya
+        if (toAnniv <= 0) {
+            anniversaryNum += 1;
+            nextAnniv.setFullYear(START_DATE.getFullYear() + anniversaryNum);
+            toAnniv = nextAnniv - now;
         }
+
+        const aD = Math.floor(toAnniv / 86400000);
+        const aH = Math.floor((toAnniv % 86400000) / 3600000);
+        const aM = Math.floor((toAnniv % 3600000) / 60000);
+        const aS = Math.floor((toAnniv % 60000) / 1000);
+        document.getElementById('a-hari').textContent  = aD;
+        document.getElementById('a-jam').textContent   = aH;
+        document.getElementById('a-menit').textContent = aM;
+        document.getElementById('a-detik').textContent = aS;
+        document.getElementById('anniv-caption').textContent = `Menuju anniversary ke-${anniversaryNum}`;
     }
     updateDashboard();
     // dashInterval dan visibilitychange sudah dikelola di blok clock di atas (Bug 2 fix)
@@ -4032,8 +4084,11 @@
     ];
 
     function getTodayGift() {
-        const day = new Date().getDate() + new Date().getMonth() * 31;
-        return gifts[day % gifts.length];
+        // FIX Bug 5: pakai ISO date string yang unik per hari, bukan date+month*31
+        const today = new Date().toISOString().slice(0, 10); // "2024-05-22"
+        let hash = 0;
+        for (let i = 0; i < today.length; i++) hash = (hash * 31 + today.charCodeAt(i)) & 0xfffffff;
+        return gifts[hash % gifts.length];
     }
 
     const giftOverlay = document.getElementById('giftOverlay');
@@ -4481,7 +4536,7 @@
         const style = document.createElement('style');
         style.textContent = `
         #letterBtn {
-            position:fixed; right:20px; bottom:180px; z-index:9000;
+            position:fixed; right:20px; bottom:180px; z-index:9000; pointer-events:auto;
             width:52px; height:52px; border-radius:50%; border:none; cursor:pointer;
             background:linear-gradient(135deg,#fb6f92,#e05070);
             color:white; font-size:1.3rem; box-shadow:0 4px 20px rgba(251,111,146,0.5);
@@ -5074,6 +5129,8 @@
 
         window.openDrawTogether = function() {
             document.getElementById('drawModal').classList.add('show');
+            // FIX: reset seenDrawKeys setiap buka modal supaya stroke tidak hilang
+            seenDrawKeys.clear();
             renderPalette();
         };
 
@@ -5453,7 +5510,9 @@
 
             // Draw chart manually (no external lib)
             const ctx = canvas.getContext('2d');
-            const W = canvas.offsetWidth || 300;
+            // FIX: pakai parentElement width bukan offsetWidth supaya tidak overflow
+            const containerW = canvas.parentElement ? canvas.parentElement.clientWidth : 300;
+            const W = Math.min(containerW, window.innerWidth - 32) || 300;
             canvas.width = W * window.devicePixelRatio;
             canvas.height = 180 * window.devicePixelRatio;
             canvas.style.width = W + 'px';
@@ -5494,6 +5553,8 @@
                 if (started) {
                     const lastValid = [...points].reverse().find(p => p.y !== null);
                     const firstValid = points.find(p => p.y !== null);
+                    // FIX Bug 6: guard kalau tidak ada data valid sama sekali
+                    if (!lastValid || !firstValid) { ctx.closePath(); ctx.fill(); return; }
                     ctx.lineTo(lastValid.x, PAD_T + chartH);
                     ctx.lineTo(firstValid.x, PAD_T + chartH);
                     ctx.closePath();
@@ -5711,6 +5772,12 @@
 
         window.deleteSuratModal = function() {
             if (!currentSuratId || !window._fb) return;
+            // FIX: hanya pengirim yang boleh hapus suratnya sendiri
+            const surat = allSuratData[currentSuratId];
+            if (surat && surat.from !== window.APP_WHO) {
+                alert('Kamu hanya bisa hapus suratmu sendiri 💌');
+                return;
+            }
             if (!confirm('Hapus surat ini?')) return;
             const { db, ref, remove } = window._fb;
             remove(ref(db, 'surat/' + currentSuratId)).then(() => {
@@ -5719,10 +5786,13 @@
             });
         };
 
+        let _suratUnsubscribe = null;
         function loadSuratData() {
             if (!window._fb) return;
+            // FIX Bug 4: batalkan listener lama sebelum daftar baru
+            if (_suratUnsubscribe) { _suratUnsubscribe(); _suratUnsubscribe = null; }
             const { db, ref, onValue } = window._fb;
-            onValue(ref(db, 'surat'), snap => {
+            _suratUnsubscribe = onValue(ref(db, 'surat'), snap => {
                 allSuratData = snap.exists() ? snap.val() : {};
                 renderSuratList();
             });
@@ -5861,7 +5931,7 @@
                 if (!snap.exists()) return;
                 const val = snap.val();
                 if (!val || !val.ts) return;
-                const drawKey = 'draw-' + Math.floor(val.ts / 10000);
+                const drawKey = 'draw-' + snap.key;
                 if (_notifSeen.has(drawKey)) return;
                 _notifSeen.add(drawKey);
                 // ts dari Firebase serverTimestamp bisa berupa number
