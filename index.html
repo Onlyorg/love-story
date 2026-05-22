@@ -2938,12 +2938,12 @@
     // ================================================
     // GLOBAL IDENTITY — siapa yang lagi buka app ini
     // ================================================
-    window.APP_WHO = localStorage.getItem('appWho') || null; // 'Dit' | 'Nar' | null
+    window.APP_WHO = null; // Selalu minta pilih Dit/Nar setiap buka
 
     // Setelah identitas dipilih, auto-login semua fitur yang butuh "siapa kamu"
     function propagateWho(who) {
         window.APP_WHO = who;
-        localStorage.setItem('appWho', who);
+        // identitas tidak disimpan — selalu pilih ulang setiap buka
 
         // Auto-select di Mood Tracker
         if (typeof moodSelectWho === 'function') moodSelectWho(who);
